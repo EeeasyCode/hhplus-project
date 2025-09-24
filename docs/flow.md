@@ -26,15 +26,22 @@ sequenceDiagram
     participant Client as Client
     participant Server as Server
     participant Redis as Redis
+    participant DB as PostgreSQL
 
     User->>Client: 콘서트 예약 서비스 접속
-    Client->>Server: POST /api/v1/queue/token<br/>{userId: "user-123"}
+    Client->>Server: GET /api/v1/concerts/available<br/>Authorization: Bearer {userToken}
+    Server->>DB: SELECT * FROM concerts WHERE booking_start_time <= NOW() AND booking_end_time >= NOW()
+    Server-->>Client: 예약 가능한 콘서트 목록
+    Client-->>User: 콘서트 목록 화면 표시
 
-    Server->>Redis: ZADD queue:waiting {timestamp} {userId}
+    User->>Client: "IU 콘서트" 선택
+    Client->>Server: POST /api/v1/queue/token<br/>{userId: "user-123", concertId: "concert-iu-001"}
+
+    Server->>Redis: ZADD queue:waiting:{concertId} {timestamp} {userId}
     Server->>Redis: HSET user:{userId}:queue position status queueId
     Server-->>Client: 200 OK<br/>{token, queuePosition: 1247, estimatedWaitTime: 900, status: "WAITING"}<br/>Note: estimatedWaitTime = position * 30초 (서버에서 계산)
 
-    Client-->>User: 대기열 화면 표시<br/>"현재 1247번째, 예상 대기시간 15분"
+    Client-->>User: "IU 콘서트" 대기열 화면 표시<br/>"현재 1247번째, 예상 대기시간 15분"
 
     loop 대기열 상태 확인 (30초마다)
         Client->>Server: GET /api/v1/queue/status<br/>Authorization: Bearer {token}
@@ -45,7 +52,7 @@ sequenceDiagram
             Client-->>User: 대기 순서 업데이트
         else 활성화됨
             Server-->>Client: {queuePosition: 0, status: "ACTIVE", activeUntil: "..."}
-            Client-->>User: "예약 가능! 콘서트 선택 화면으로 이동"
+            Client-->>User: "예약 가능! IU 콘서트 좌석 선택 화면으로 이동"
             Note over Client,User: 대기열 polling 종료
         end
     end
@@ -63,24 +70,10 @@ sequenceDiagram
     participant Redis as Redis
     participant DB as PostgreSQL
 
-    Note over User,DB: 대기열 통과 후 ACTIVE 상태
+    Note over User,DB: "IU 콘서트" 대기열 통과 후 ACTIVE 상태
 
-    User->>Client: 콘서트 목록 보기
-    Client->>Server: GET /api/v1/concerts/dates<br/>Authorization: Bearer {token}
-
-    Server->>Redis: 캐시 확인 (cache:concerts:dates)
-    alt 캐시 있음
-        Redis-->>Server: 캐시된 콘서트 목록
-    else 캐시 없음
-        Server->>DB: SELECT concerts + available_seats 계산
-        Server->>Redis: SET cache:concerts:dates (60초 TTL)
-    end
-
-    Server-->>Client: 콘서트 목록 응답
-    Client-->>User: 콘서트 목록 화면 표시
-
-    User->>Client: 특정 콘서트 선택
-    Client->>Server: GET /api/v1/concerts/{concertId}/seats<br/>Authorization: Bearer {token}
+    User->>Client: 좌석 선택 화면 진입
+    Client->>Server: GET /api/v1/concerts/concert-iu-001/seats<br/>Authorization: Bearer {token}
     Server->>DB: SELECT seat_number,<br/>CASE WHEN status='AVAILABLE' THEN 'AVAILABLE'<br/>WHEN status='TEMPORARILY_RESERVED' AND temp_reserved_until < NOW()<br/>THEN 'AVAILABLE' ELSE status END as actual_status<br/>FROM seats WHERE concert_id = ?
     Server-->>Client: 실시간 좌석 상태 응답
     Client-->>User: 좌석 선택 화면 표시
@@ -270,12 +263,13 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> 서비스접속
-    서비스접속 --> 대기열등록: 토큰 발급 요청
+    서비스접속 --> 콘서트목록조회: 이용 가능한 콘서트 확인
+    콘서트목록조회 --> 콘서트선택: 특정 콘서트 선택
+    콘서트선택 --> 대기열등록: 해당 콘서트 대기열 진입
     대기열등록 --> 대기중: WAITING 상태
     대기중 --> 대기중: 순서 업데이트 (polling)
     대기중 --> 예약가능: ACTIVE 상태로 변경
-    예약가능 --> 콘서트선택: 콘서트 목록 조회
-    콘서트선택 --> 좌석선택: 특정 콘서트 선택
+    예약가능 --> 좌석선택: 해당 콘서트 좌석 화면
     좌석선택 --> 임시예약: 좌석 예약 성공
     임시예약 --> 잔액충전: 잔액 부족시
     임시예약 --> 결제진행: 잔액 충분시

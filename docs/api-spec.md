@@ -28,7 +28,8 @@ POST /queue/tokens
 
 ```json
 {
-  "userId": "user-uuid-123"
+  "userId": "user-uuid-123",
+  "concertId": "concert-123"
 }
 ```
 
@@ -399,7 +400,7 @@ Authorization: Bearer {token}
 
 **Query Parameters**
 
-- `type`: 거래 유형 필터 (`CHARGE`, `PAYMENT`)
+- `type`: 거래 유형 필터 (`CHARGE`, `PAYMENT`, `REFUND`)
 - `page`: 페이지 번호 (default: 1)
 - `limit`: 페이지 크기 (default: 10)
 
